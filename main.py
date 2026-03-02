@@ -11,7 +11,7 @@ def main():
     try:
         import torch
         from models.unet import Unet3D
-        from diffusion import GaussianDiffusion
+        from models.diffusion import GaussianDiffusion
         from dataloader import UCF101Dataset
     except ImportError as e:
         print("Error: Required libraries not found.")
@@ -29,18 +29,37 @@ def main():
 
     # Create output directories
     os.makedirs(config['log_dir'], exist_ok=True)
+    code_save_path = os.path.join(config['log_dir'], config['code_save_dir'])
+    os.makedirs(code_save_path, exist_ok=True)
     os.makedirs(config['checkpoint_dir'], exist_ok=True)
     os.makedirs(config['sample_dir'], exist_ok=True)
     
-    # Copy important files to log directory for record keeping
+    # Copy important files and directories to log directory for record keeping
     import shutil
-    files_to_copy = ['config.yaml', 'main.py', 'diffusion.py', 'unet.py', 'dataloader.py']
+    items_to_copy = config['items_to_save']
     
-    for file in files_to_copy:
-        if os.path.exists(file):
-            dest_path = os.path.join(config['log_dir'], file)
-            shutil.copy2(file, dest_path)
-            print(f"Copied {file} to {dest_path}")
+    for item in items_to_copy:
+        item_type = item['type']
+        item_path = item['path']
+        
+        if not os.path.exists(item_path):
+            print(f"Warning: {item_path} does not exist, skipping...")
+            continue
+            
+        dest_path = os.path.join(code_save_path, item_path)
+        
+        if item_type == 'file':
+            # Ensure parent directory exists
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            shutil.copy2(item_path, dest_path)
+            print(f"Copied file {item_path} to {dest_path}")
+            
+        elif item_type == 'dir':
+            # Remove existing directory if it exists
+            if os.path.exists(dest_path):
+                shutil.rmtree(dest_path)
+            shutil.copytree(item_path, dest_path)
+            print(f"Copied directory {item_path} to {dest_path}")
 
     # Initialize 3D U-Net
     print("Initializing 3D U-Net...")
@@ -142,7 +161,7 @@ def main():
             pbar.set_postfix(loss=loss.item())
         
         # Average loss
-        avg_loss = total_loss / len(dataloader)
+        avg_loss = total_loss / len(train_loader)
         print(f"Epoch {epoch+1}/{config['epochs']}, Average Loss: {avg_loss:.6f}")
         
         # Log loss to TensorBoard

@@ -2,13 +2,21 @@
 
 # Data path
 data_path: "/data/lhy_data/video_data/UCF101/UCF-101"
-train_split_path: "/data/lhy_data/video_data/UCF101TrainTestSplits-RecognitionTask/ucfTrainTestlist/trainlist01.txt"
-test_split_path: "/data/lhy_data/video_data/UCF101TrainTestSplits-RecognitionTask/ucfTrainTestlist/testlist01.txt"
+train_split_path: "/data/lhy_data/video_data/UCF101/UCF101TrainTestSplits-RecognitionTask/ucfTrainTestlist/trainlist01.txt"
+test_split_path: "/data/lhy_data/video_data/UCF101/UCF101TrainTestSplits-RecognitionTask/ucfTrainTestlist/testlist01.txt"
 
 # Log and output paths
-log_dir: "/data/lhy_data/video_generation/try/logs/train_try0"
-checkpoint_dir: "/data/lhy_data/video_generation/try/checkpoints/train_try0"
-sample_dir: "/data/lhy_data/video_generation/try/samples/train_try0"
+log_dir: "/data/lhy_data/video_generation/try/logs"
+checkpoint_dir: "/data/lhy_data/video_generation/try/checkpoints"
+sample_dir: "/data/lhy_data/video_generation/try/samples"
+code_save_dir: "codes"
+items_to_save: [
+    {"type": "file", "path": "config.yaml"},
+    {"type": "file", "path": "main.py"},
+    {"type": "file", "path": "dataloader.py"},
+    {"type": "dir", "path": "models"},
+    {"type": "dir", "path": "tools"},
+]
 
 # Training parameters
 batch_size: 1
