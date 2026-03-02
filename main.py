@@ -1,0 +1,132 @@
+import sys
+import yaml
+import os
+import torch
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
+
+def main():
+    try:
+        import torch
+        from unet import Unet3D
+        from diffusion import GaussianDiffusion
+        from dataloader import UCF101Dataset
+    except ImportError as e:
+        print("Error: Required libraries not found.")
+        print(f"Details: {e}")
+        print("Please install the requirements using:")
+        print("pip install -r requirements.txt")
+        return
+
+    # Load configuration
+    with open('config.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+    
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
+
+    # Create output directories
+    os.makedirs(config['log_dir'], exist_ok=True)
+    os.makedirs(config['checkpoint_dir'], exist_ok=True)
+    os.makedirs(config['sample_dir'], exist_ok=True)
+
+    # Initialize 3D U-Net
+    print("Initializing 3D U-Net...")
+    model = Unet3D(
+        dim=config['dim'],
+        dim_mults=config['dim_mults'],
+        channels=config['channels'],
+        time_steps=config['time_steps']
+    ).to(device)
+
+    print("Model initialized.")
+
+    # Initialize Diffusion
+    print("Initializing Gaussian Diffusion...")
+    diffusion = GaussianDiffusion(
+        model,
+        image_size=config['image_size'],
+        timesteps=config['timesteps'],
+        objective=config['objective']
+    ).to(device)
+
+    print("Diffusion initialized.")
+
+    # Initialize DataLoader
+    print("\n--- Initializing DataLoader ---")
+    dataloader = DataLoader(
+        UCF101Dataset(
+            data_path=config['data_path'],
+            image_size=config['image_size'],
+            time_steps=config['time_steps'],
+            transform=transforms.Compose([
+                transforms.ToPILImage(),
+                transforms.Resize((config['image_size'], config['image_size'])),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+            ])
+        ),
+        batch_size=config['batch_size'],
+        shuffle=True,
+        num_workers=4
+    )
+    print(f"DataLoader initialized with {len(dataloader.dataset)} videos.")
+
+    # Initialize TensorBoard writer
+    writer = SummaryWriter(log_dir=config['log_dir'])
+    
+    # Initialize optimizer
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(config['learning_rate']),
+        weight_decay=float(config['weight_decay'])
+    )
+
+    # Training loop
+    print("\n--- Starting Training ---")
+    for epoch in range(config['epochs']):
+        model.train()
+        total_loss = 0.0
+        
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{config['epochs']}")
+        for batch in pbar:
+            batch = batch.to(device)
+            
+            # Random timesteps
+            t = torch.randint(0, config['timesteps'], (batch.size(0),)).to(device)
+            
+            # Compute loss
+            loss = diffusion.p_losses(batch, t)
+            
+            # Backward pass
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            pbar.set_postfix(loss=loss.item())
+        
+        # Average loss
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch {epoch+1}/{config['epochs']}, Average Loss: {avg_loss:.6f}")
+        
+        # Log loss to TensorBoard
+        writer.add_scalar('Loss/Average', avg_loss, epoch+1)
+        writer.add_scalar('Loss/Learning_Rate', optimizer.param_groups[0]['lr'], epoch+1)
+        
+        # Save checkpoint
+        if (epoch + 1) % 10 == 0:
+            checkpoint_path = os.path.join(config['checkpoint_dir'], f"checkpoint_epoch_{epoch+1}.pth")
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"Checkpoint saved to {checkpoint_path}")
+            
+            # Log checkpoint event
+            writer.add_text('Checkpoint', f"Saved at epoch {epoch+1}", epoch+1)
+
+    print("\n--- Training Complete ---")
+    print("Done.")
+
+if __name__ == "__main__":
+    main()

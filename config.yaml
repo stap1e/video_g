@@ -1,0 +1,30 @@
+# Configuration file for video generation project
+
+# Data path
+data_path: "/data/lhy_data/video_data/UCF101/UCF-101"
+
+# Log and output paths
+log_dir: "/data/lhy_data/video_generation/try/logs"
+checkpoint_dir: "/data/lhy_data/video_generation/try/checkpoints"
+sample_dir: "/data/lhy_data/video_generation/try/samples"
+
+# Training parameters
+batch_size: 4
+epochs: 100
+learning_rate: 1e-4
+weight_decay: 1e-6
+
+# Model parameters
+dim: 64
+dim_mults: [1, 2, 4, 8]
+channels: 3
+time_steps: 16  # frames
+image_size: 64  # spatial resolution
+
+# Diffusion parameters
+timesteps: 1000
+objective: "pred_x0"
+
+# Reconstruction guidance
+w_r: 10.0
+
