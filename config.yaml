@@ -6,9 +6,11 @@ train_split_path: "/data/lhy_data/video_data/UCF101/UCF101TrainTestSplits-Recogn
 test_split_path: "/data/lhy_data/video_data/UCF101/UCF101TrainTestSplits-RecognitionTask/ucfTrainTestlist/testlist01.txt"
 
 # Log and output paths
-log_dir: "/data/lhy_data/video_generation/try/logs"
-checkpoint_dir: "/data/lhy_data/video_generation/try/checkpoints"
-sample_dir: "/data/lhy_data/video_generation/try/samples"
+model_type: "base"  # "big" or "base"
+base_dir: "/data/lhy_data/video_generation/try_${model_type}"
+log_dir: "${base_dir}/logs"
+checkpoint_dir: "${base_dir}/checkpoints"
+sample_dir: "${base_dir}/samples"
 code_save_dir: "codes"
 items_to_save: [
     {"type": "file", "path": "config.yaml"},
@@ -19,7 +21,7 @@ items_to_save: [
 ]
 
 # Training parameters
-batch_size: 1
+batch_size: 256
 epochs: 100
 learning_rate: 1e-4
 weight_decay: 1e-6
@@ -30,6 +32,8 @@ dim_mults: [1, 2, 4, 8]
 channels: 3
 time_steps: 16  # frames
 image_size: 64  # spatial resolution
+class_num: 101
+deep: false
 
 # Diffusion parameters
 timesteps: 1000

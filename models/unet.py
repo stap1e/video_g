@@ -418,13 +418,14 @@ class unet_3D(nn.Module):
                   'class_num': class_num,
                   'bilinear': False,
                   'acti_func': 'relu'}
+        self.channels = in_chns
         self.deep = deep
         self.params = params
         self.encoder = Encoder(self.params)
         self.decoder = Decoder_wtcls(self.params)
         self.classifier = nn.Conv3d(self.params['feature_chns'][0], class_num, 1)
 
-    def forward(self, inputs, comp_drop=None, feature_need=False, consist=False):
+    def forward(self, inputs, t=None, comp_drop=None, feature_need=False, consist=False):
         features = self.encoder(inputs)
         if comp_drop != None:
             for i in range(0, len(features)):
@@ -439,16 +440,10 @@ class unet_3D(nn.Module):
             feature_final, deep_feature = feature_final[0], feature_final[1]
         elif self.deep and consist:
             center, feature_final, deep_feature = feature_final[0], feature_final[1], feature_final[2]
-        out = self.classifier(feature_final)
-        if feature_need and self.deep:
-            if consist:
-                return out, center, deep_feature
-            return out, deep_feature
-        elif feature_need and not self.deep:
-            if consist:
-                return out, center, feature_final
-            return out, feature_final
-        return out
+        # Add final convolution to match input channels (3)
+        final_conv = nn.Conv3d(feature_final.size(1), 3, kernel_size=1).to(feature_final.device)
+        output = final_conv(feature_final)
+        return output
 
     @staticmethod
     def apply_argmax_softmax(pred):

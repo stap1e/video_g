@@ -12,6 +12,7 @@ def main():
     try:
         import torch
         from models.unet import Unet3D
+        from models.unet import unet_3D
         from models.diffusion import GaussianDiffusion
         from dataloader import UCF101Dataset
     except ImportError as e:
@@ -22,8 +23,8 @@ def main():
         return
 
     # Load configuration
-    with open('config.yaml', 'r') as f:
-        config = yaml.safe_load(f)
+    from omegaconf import OmegaConf
+    config = OmegaConf.load("config.yaml")
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
@@ -64,12 +65,23 @@ def main():
 
     # Initialize 3D U-Net
     print("Initializing 3D U-Net...")
-    model = Unet3D(
-        dim=config['dim'],
-        dim_mults=config['dim_mults'],
-        channels=config['channels'],
-        time_steps=config['time_steps']
-    ).to(device)
+    model_type = config.get('model_type', 'big')
+    
+    if model_type == 'big':
+        model = Unet3D(
+            dim=config['dim'],
+            dim_mults=config['dim_mults'],
+            channels=config['channels'],
+            time_steps=config['time_steps']
+        ).to(device)
+    elif model_type == 'base':
+        model = unet_3D(
+            in_chns=config['channels'],
+            class_num=config.get('class_num', 101),
+            deep=config.get('deep', False)
+        ).to(device)
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}. Choose 'big' or 'base'.")
 
     # Count total parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -86,6 +98,17 @@ def main():
     print(f"Trainable parameters: {trainable_params_m:.3f}M")
     print(f"Non-trainable parameters: {non_trainable_params_m:.3f}M")
     print(f"Model initialized.")
+    
+    # Load latest weights if available
+    latest_checkpoint = os.path.join(config['checkpoint_dir'], "latest.pth")
+    start_epoch = 0
+    
+    if os.path.exists(latest_checkpoint):
+        checkpoint = torch.load(latest_checkpoint)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        print(f"Loaded latest checkpoint from epoch {start_epoch}")
 
     # Initialize Diffusion
     print("Initializing Gaussian Diffusion...")
@@ -164,7 +187,7 @@ def main():
     print("\n--- Starting Training ---")
     total_start_time = time.time()
     
-    for epoch in range(config['epochs']):
+    for epoch in range(start_epoch, config['epochs']):
         epoch_start_time = time.time()
         model.train()
         total_loss = 0.0
@@ -201,14 +224,34 @@ def main():
         writer.add_scalar('Loss/Learning_Rate', optimizer.param_groups[0]['lr'], epoch+1)
         writer.add_scalar('Time/Epoch', epoch_time, epoch+1)
         
-        # Save checkpoint
-        if (epoch + 1) % 10 == 0:
-            checkpoint_path = os.path.join(config['checkpoint_dir'], f"checkpoint_epoch_{epoch+1}.pth")
-            torch.save(model.state_dict(), checkpoint_path)
-            print(f"Checkpoint saved to {checkpoint_path}")
+        # Save latest checkpoint every epoch
+        latest_checkpoint = os.path.join(config['checkpoint_dir'], "latest.pth")
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': avg_loss
+        }, latest_checkpoint)
+        print(f"Latest checkpoint saved to {latest_checkpoint}")
+        
+        # Validation every 5 epochs
+        if (epoch + 1) % 5 == 0:
+            model.eval()
+            val_loss = 0.0
             
-            # Log checkpoint event
-            writer.add_text('Checkpoint', f"Saved at epoch {epoch+1}", epoch+1)
+            with torch.no_grad():
+                for batch in test_loader:
+                    batch = batch.to(device)
+                    t = torch.randint(0, config['timesteps'], (batch.size(0),)).to(device)
+                    loss = diffusion.p_losses(batch, t)
+                    val_loss += loss.item()
+            
+            avg_val_loss = val_loss / len(test_loader)
+            print(f"Epoch {epoch+1}/{config['epochs']}, Validation Loss: {avg_val_loss:.6f}")
+            writer.add_scalar('Loss/Validation', avg_val_loss, epoch+1)
+            
+            # Switch back to train mode
+            model.train()
 
     # Calculate total training time
     total_training_time = time.time() - total_start_time
