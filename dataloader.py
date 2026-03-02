@@ -6,7 +6,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 class UCF101Dataset(Dataset):
-    def __init__(self, data_path, image_size=64, time_steps=16, transform=None):
+    def __init__(self, data_path, image_size=64, time_steps=16, transform=None, split_file=None):
         self.data_path = data_path
         self.image_size = image_size
         self.time_steps = time_steps
@@ -16,13 +16,22 @@ class UCF101Dataset(Dataset):
         self.classes = sorted(os.listdir(data_path))
         self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
         
-        # Get all video paths
+        # Get video paths from split file if provided
         self.video_paths = []
-        for cls in self.classes:
-            cls_dir = os.path.join(data_path, cls)
-            for video_file in os.listdir(cls_dir):
-                if video_file.endswith('.avi'):
-                    self.video_paths.append(os.path.join(cls_dir, video_file))
+        if split_file:
+            with open(split_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        video_rel_path = line.split()[0]
+                        self.video_paths.append(os.path.join(data_path, video_rel_path))
+        else:
+            # Fallback to loading all videos
+            for cls in self.classes:
+                cls_dir = os.path.join(data_path, cls)
+                for video_file in os.listdir(cls_dir):
+                    if video_file.endswith('.avi'):
+                        self.video_paths.append(os.path.join(cls_dir, video_file))
     
     def __len__(self):
         return len(self.video_paths)
@@ -62,7 +71,7 @@ class UCF101Dataset(Dataset):
         
         return video_tensor
 
-def get_dataloader(data_path, batch_size=4, image_size=64, time_steps=16, shuffle=True):
+def get_dataloader(data_path, batch_size=4, image_size=64, time_steps=16, shuffle=True, split_file=None):
     transform = transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize((image_size, image_size)),
@@ -70,7 +79,7 @@ def get_dataloader(data_path, batch_size=4, image_size=64, time_steps=16, shuffl
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
     
-    dataset = UCF101Dataset(data_path, image_size, time_steps, transform)
+    dataset = UCF101Dataset(data_path, image_size, time_steps, transform, split_file)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=4)
     
     return dataloader

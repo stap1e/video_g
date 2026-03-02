@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Set GPU ID (default: 6)
-GPU_ID=${1:-6}
+# Set GPU ID (default: 2)
+GPU_ID=${1:-2}
 
 # Set CUDA visible devices
 export CUDA_VISIBLE_DEVICES=$GPU_ID

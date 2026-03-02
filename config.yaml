@@ -2,6 +2,8 @@
 
 # Data path
 data_path: "/data/lhy_data/video_data/UCF101/UCF-101"
+train_split_path: "/data/lhy_data/video_data/UCF101TrainTestSplits-RecognitionTask/ucfTrainTestlist/trainlist01.txt"
+test_split_path: "/data/lhy_data/video_data/UCF101TrainTestSplits-RecognitionTask/ucfTrainTestlist/testlist01.txt"
 
 # Log and output paths
 log_dir: "/data/lhy_data/video_generation/try/logs/train_try0"

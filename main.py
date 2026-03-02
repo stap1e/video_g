@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 def main():
     try:
         import torch
-        from unet import Unet3D
+        from models.unet import Unet3D
         from diffusion import GaussianDiffusion
         from dataloader import UCF101Dataset
     except ImportError as e:
@@ -64,25 +64,48 @@ def main():
 
     print("Diffusion initialized.")
 
-    # Initialize DataLoader
-    print("\n--- Initializing DataLoader ---")
-    dataloader = DataLoader(
-        UCF101Dataset(
-            data_path=config['data_path'],
-            image_size=config['image_size'],
-            time_steps=config['time_steps'],
-            transform=transforms.Compose([
-                transforms.ToPILImage(),
-                transforms.Resize((config['image_size'], config['image_size'])),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-            ])
-        ),
+    # Initialize DataLoaders
+    print("\n--- Initializing DataLoaders ---")
+    
+    # Transform pipeline
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((config['image_size'], config['image_size'])),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    ])
+    
+    # Train DataLoader
+    train_dataset = UCF101Dataset(
+        data_path=config['data_path'],
+        image_size=config['image_size'],
+        time_steps=config['time_steps'],
+        transform=transform,
+        split_file=config['train_split_path']
+    )
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=config['batch_size'],
         shuffle=True,
         num_workers=4
     )
-    print(f"DataLoader initialized with {len(dataloader.dataset)} videos.")
+    print(f"Train DataLoader initialized with {len(train_loader.dataset)} videos.")
+    
+    # Test DataLoader
+    test_dataset = UCF101Dataset(
+        data_path=config['data_path'],
+        image_size=config['image_size'],
+        time_steps=config['time_steps'],
+        transform=transform,
+        split_file=config['test_split_path']
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=config['batch_size'],
+        shuffle=False,
+        num_workers=4
+    )
+    print(f"Test DataLoader initialized with {len(test_loader.dataset)} videos.")
 
     # Initialize TensorBoard writer
     writer = SummaryWriter(log_dir=config['log_dir'])
@@ -100,7 +123,7 @@ def main():
         model.train()
         total_loss = 0.0
         
-        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{config['epochs']}")
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{config['epochs']}")
         for batch in pbar:
             batch = batch.to(device)
             
