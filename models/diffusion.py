@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import inspect
 from tqdm import tqdm
 
 def linear_beta_schedule(timesteps):
@@ -45,12 +46,17 @@ class GaussianDiffusion(nn.Module):
         )
 
     def q_posterior(self, x_start, x_t, t):
-        posterior_mean = (
-            self.posterior_mean_coef1[t] * x_start +
-            self.posterior_mean_coef2[t] * x_t
-        )
-        posterior_variance = self.posterior_variance[t]
-        posterior_log_variance_clipped = self.posterior_log_variance_clipped[t]
+        if x_start.shape != x_t.shape:
+            print(f"[shape-debug] x_start={tuple(x_start.shape)} x_t={tuple(x_t.shape)} t={tuple(t.shape)}")
+            if x_start.dim() == 5 and x_t.dim() == 5:
+                x_start = F.interpolate(x_start, size=x_t.shape[2:], mode="trilinear", align_corners=False)
+            elif x_start.dim() == 4 and x_t.dim() == 4:
+                x_start = F.interpolate(x_start, size=x_t.shape[2:], mode="bilinear", align_corners=False)
+        coef1 = self.posterior_mean_coef1[t].view(-1, 1, 1, 1, 1)
+        coef2 = self.posterior_mean_coef2[t].view(-1, 1, 1, 1, 1)
+        posterior_mean = coef1 * x_start + coef2 * x_t
+        posterior_variance = self.posterior_variance[t].view(-1, 1, 1, 1, 1)
+        posterior_log_variance_clipped = self.posterior_log_variance_clipped[t].view(-1, 1, 1, 1, 1)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(self, x, t, clip_denoised=True, cond=None, reconstruction_guidance=None):
@@ -60,7 +66,20 @@ class GaussianDiffusion(nn.Module):
         if reconstruction_guidance is not None:
             x = x.detach().requires_grad_(True)
             
-        model_output = self.model(x, t, cond=cond)
+        if cond is None:
+            model_output = self.model(x, t)
+        else:
+            try:
+                parameters = inspect.signature(self.model.forward).parameters
+            except (TypeError, ValueError):
+                parameters = {}
+            if "cond" in parameters:
+                model_output = self.model(x, t, cond=cond)
+            else:
+                model_output = self.model(x, t)
+        if model_output.shape != x.shape:
+            if model_output.dim() == 5 and x.dim() == 5:
+                model_output = F.interpolate(model_output, size=x.shape[2:], mode="trilinear", align_corners=False)
 
         if self.objective == 'pred_noise':
             x_start = self.predict_start_from_noise(x, t=t, noise=model_output)
@@ -69,6 +88,9 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
+        if x_start.shape != x.shape:
+            if x_start.dim() == 5 and x.dim() == 5:
+                x_start = F.interpolate(x_start, size=x.shape[2:], mode="trilinear", align_corners=False)
         if clip_denoised:
             x_start.clamp_(-1., 1.)
 
@@ -150,16 +172,23 @@ class GaussianDiffusion(nn.Module):
     def p_sample(self, x, t, clip_denoised=True, cond=None, reconstruction_guidance=None):
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, clip_denoised=clip_denoised, cond=cond, reconstruction_guidance=reconstruction_guidance)
-        noise = torch.randn_like(x) if t > 0 else 0.
+        noise = torch.randn_like(x) if t[0].item() > 0 else 0.
         return model_mean + (0.5 * model_log_variance).exp() * noise
 
     @torch.no_grad()
     def sample(self, shape, cond=None, reconstruction_guidance=None):
         device = next(self.model.parameters()).device
+        if isinstance(shape, int):
+            time_steps = getattr(self.model, "time_steps", None)
+            if time_steps is None and hasattr(self.model, "module"):
+                time_steps = getattr(self.model.module, "time_steps", None)
+            if time_steps is None:
+                raise ValueError("time_steps is required on the model to infer sample shape")
+            shape = (shape, self.channels, time_steps, self.image_size, self.image_size)
         b = shape[0]
         img = torch.randn(shape, device=device)
         
-        for t in tqdm(reversed(range(0, self.timesteps)), desc='sampling loop time step', total=self.timesteps):
+        for t in tqdm(reversed(range(0, self.timesteps)), desc='sampling loop time step', total=self.timesteps, ncols=80):
             t_tensor = torch.full((b,), t, device=device, dtype=torch.long)
             # We need gradients for guidance, so we cannot use no_grad for the whole loop if guidance is on.
             # However, sample is decorated with no_grad.

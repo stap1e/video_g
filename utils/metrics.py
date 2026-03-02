@@ -52,16 +52,18 @@ class FVDCalculator:
             real_features.append(real_feat)
             fake_features.append(fake_feat)
         
-        # Average over time
-        real_feat = torch.cat(real_features, dim=0).mean(0)
-        fake_feat = torch.cat(fake_features, dim=0).mean(0)
+        real_feat = torch.cat(real_features, dim=0)
+        fake_feat = torch.cat(fake_features, dim=0)
         
-        # Compute FVD
-        mu_real = real_feat.cpu().numpy()
-        mu_fake = fake_feat.cpu().numpy()
+        mu_real = real_feat.mean(dim=0).cpu().numpy()
+        mu_fake = fake_feat.mean(dim=0).cpu().numpy()
         
-        sigma_real = np.cov(real_feat.cpu().numpy().T)
-        sigma_fake = np.cov(fake_feat.cpu().numpy().T)
+        sigma_real = np.cov(real_feat.cpu().numpy(), rowvar=False)
+        sigma_fake = np.cov(fake_feat.cpu().numpy(), rowvar=False)
+        if sigma_real.ndim == 0:
+            sigma_real = np.array([[sigma_real]])
+        if sigma_fake.ndim == 0:
+            sigma_fake = np.array([[sigma_fake]])
         
         # Compute sqrt of product of covariances
         covmean = sqrtm(sigma_real.dot(sigma_fake), disp=False)[0]

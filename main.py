@@ -28,6 +28,11 @@ def main():
     # Load configuration
     from omegaconf import OmegaConf
     config = OmegaConf.load("config.yaml")
+    config['timestamp'] = time.strftime("%Y-%m-%d-%H-%M-%S")
+    config['base_dir'] = os.path.join(config['base_dir'], config['timestamp'])
+    config['log_dir'] = config['log_dir'].replace("${base_dir}", config['base_dir'])
+    config['checkpoint_dir'] = config['checkpoint_dir'].replace("${base_dir}", config['base_dir'])
+    config['sample_dir'] = config['sample_dir'].replace("${base_dir}", config['base_dir'])
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
@@ -102,6 +107,13 @@ def main():
     print(f"Non-trainable parameters: {non_trainable_params_m:.3f}M")
     print(f"Model initialized.")
     
+    # Initialize optimizer
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(config['learning_rate']),
+        weight_decay=float(config['weight_decay'])
+    )
+
     # Load latest weights if available
     latest_checkpoint = os.path.join(config['checkpoint_dir'], "latest.pth")
     start_epoch = 0
@@ -124,8 +136,10 @@ def main():
         print(f"Loaded latest checkpoint from epoch {start_epoch}")
         print(f"Current best metrics - FVD: {best_fvd:.6f}, FID: {best_fid:.6f} at epoch {best_epoch}")
 
+    best_metrics_text = f"Current best metrics - FVD: {best_fvd:.6f}, FID: {best_fid:.6f} at epoch {best_epoch}"
+
     # Initialize Diffusion
-    print("Initializing Gaussian Diffusion...")
+    print(f"Initializing Gaussian Diffusion... | {best_metrics_text}")
     diffusion = GaussianDiffusion(
         model,
         image_size=config['image_size'],
@@ -190,13 +204,6 @@ def main():
     print(f"Timesteps: {config['timesteps']}")
     print(f"Objective: {config['objective']}")
     
-    # Initialize optimizer
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=float(config['learning_rate']),
-        weight_decay=float(config['weight_decay'])
-    )
-
     # Training loop
     print("\n--- Starting Training ---")
     total_start_time = time.time()
@@ -206,7 +213,7 @@ def main():
         model.train()
         total_loss = 0.0
         
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{config['epochs']}")
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{config['epochs']}, best FVD: {best_fvd:.4f}, best FID: {best_fid:.4f}, best Epoch: {best_epoch}", ncols=180)
         for batch in pbar:
             batch = batch.to(device)
             
@@ -222,7 +229,12 @@ def main():
             optimizer.step()
             
             total_loss += loss.item()
-            pbar.set_postfix(loss=loss.item())
+            pbar.set_postfix(
+                loss=loss.item(),
+                best_fvd=f"{best_fvd:.6f}",
+                best_fid=f"{best_fid:.6f}",
+                best_epoch=best_epoch
+            )
         
         # Average loss
         avg_loss = total_loss / len(train_loader)
@@ -252,12 +264,13 @@ def main():
         print(f"Latest checkpoint saved to {latest_checkpoint}")
         
         # Validation every 5 epochs
-        if (epoch + 1) % 5 == 0:
+        if (epoch + 1) % 1 == 0:
             model.eval()
             val_loss = 0.0
             
             with torch.no_grad():
-                for batch in test_loader:
+                val_pbar = tqdm(test_loader, desc=f"Val {epoch+1}/{config['epochs']}", ncols=80)
+                for batch in val_pbar:
                     batch = batch.to(device)
                     t = torch.randint(0, config['timesteps'], (batch.size(0),)).to(device)
                     loss = diffusion.p_losses(batch, t)
@@ -274,13 +287,19 @@ def main():
             fid_scores = []
             
             with torch.no_grad():
-                for i, batch in enumerate(test_loader):
+                eval_pbar = tqdm(test_loader, total=num_eval_batches, desc=f"FVD/FID {epoch+1}/{config['epochs']}", ncols=80)
+                for i, batch in enumerate(eval_pbar):
                     if i >= num_eval_batches:
                         break
                         
                     real_videos = batch.to(device)
+                    sample_shape = tuple(real_videos.shape)
+                    print(f"[shape-debug] real_videos={sample_shape} sample_shape={sample_shape}")
+                    fake_videos = diffusion.sample(sample_shape)
                     # Generate fake videos using diffusion
-                    fake_videos = diffusion.sample(real_videos.size(0))
+                    # fake_videos = diffusion.sample(
+                    #     (real_videos.size(0), config['channels'], config['time_steps'], config['image_size'], config['image_size'])
+                    # )
                     
                     # Compute metrics
                     fvd_score = compute_fvd(real_videos, fake_videos, device=device)
