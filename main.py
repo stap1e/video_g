@@ -31,6 +31,16 @@ def main():
     os.makedirs(config['log_dir'], exist_ok=True)
     os.makedirs(config['checkpoint_dir'], exist_ok=True)
     os.makedirs(config['sample_dir'], exist_ok=True)
+    
+    # Copy important files to log directory for record keeping
+    import shutil
+    files_to_copy = ['config.yaml', 'main.py', 'diffusion.py', 'unet.py', 'dataloader.py']
+    
+    for file in files_to_copy:
+        if os.path.exists(file):
+            dest_path = os.path.join(config['log_dir'], file)
+            shutil.copy2(file, dest_path)
+            print(f"Copied {file} to {dest_path}")
 
     # Initialize 3D U-Net
     print("Initializing 3D U-Net...")
@@ -126,6 +136,10 @@ def main():
             writer.add_text('Checkpoint', f"Saved at epoch {epoch+1}", epoch+1)
 
     print("\n--- Training Complete ---")
+    
+    # Close TensorBoard writer
+    writer.close()
+    
     print("Done.")
 
 if __name__ == "__main__":

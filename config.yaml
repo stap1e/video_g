@@ -4,12 +4,12 @@
 data_path: "/data/lhy_data/video_data/UCF101/UCF-101"
 
 # Log and output paths
-log_dir: "/data/lhy_data/video_generation/try/logs"
-checkpoint_dir: "/data/lhy_data/video_generation/try/checkpoints"
-sample_dir: "/data/lhy_data/video_generation/try/samples"
+log_dir: "/data/lhy_data/video_generation/try/logs/train_try0"
+checkpoint_dir: "/data/lhy_data/video_generation/try/checkpoints/train_try0"
+sample_dir: "/data/lhy_data/video_generation/try/samples/train_try0"
 
 # Training parameters
-batch_size: 4
+batch_size: 1
 epochs: 100
 learning_rate: 1e-4
 weight_decay: 1e-6
