@@ -1,6 +1,7 @@
 import sys
 import yaml
 import os
+import time
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -70,7 +71,21 @@ def main():
         time_steps=config['time_steps']
     ).to(device)
 
-    print("Model initialized.")
+    # Count total parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    # Convert to million units
+    total_params_m = total_params / 1_000_000
+    trainable_params_m = trainable_params / 1_000_000
+    non_trainable_params_m = (total_params - trainable_params) / 1_000_000
+    
+    # Print model parameters
+    print("\n--- Model Parameters ---")
+    print(f"Total parameters: {total_params_m:.3f}M")
+    print(f"Trainable parameters: {trainable_params_m:.3f}M")
+    print(f"Non-trainable parameters: {non_trainable_params_m:.3f}M")
+    print(f"Model initialized.")
 
     # Initialize Diffusion
     print("Initializing Gaussian Diffusion...")
@@ -129,6 +144,15 @@ def main():
     # Initialize TensorBoard writer
     writer = SummaryWriter(log_dir=config['log_dir'])
     
+    # Print training parameters
+    print("\n--- Training Parameters ---")
+    print(f"Epochs: {config['epochs']}")
+    print(f"Batch size: {config['batch_size']}")
+    print(f"Learning rate: {config['learning_rate']}")
+    print(f"Weight decay: {config['weight_decay']}")
+    print(f"Timesteps: {config['timesteps']}")
+    print(f"Objective: {config['objective']}")
+    
     # Initialize optimizer
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -138,7 +162,10 @@ def main():
 
     # Training loop
     print("\n--- Starting Training ---")
+    total_start_time = time.time()
+    
     for epoch in range(config['epochs']):
+        epoch_start_time = time.time()
         model.train()
         total_loss = 0.0
         
@@ -162,11 +189,17 @@ def main():
         
         # Average loss
         avg_loss = total_loss / len(train_loader)
-        print(f"Epoch {epoch+1}/{config['epochs']}, Average Loss: {avg_loss:.6f}")
         
-        # Log loss to TensorBoard
+        # Calculate epoch time
+        epoch_time = time.time() - epoch_start_time
+        epoch_time_min = epoch_time / 60
+        
+        print(f"Epoch {epoch+1}/{config['epochs']}, Average Loss: {avg_loss:.6f}, Time: {epoch_time:.2f}s ({epoch_time_min:.2f}min)")
+        
+        # Log loss and time to TensorBoard
         writer.add_scalar('Loss/Average', avg_loss, epoch+1)
         writer.add_scalar('Loss/Learning_Rate', optimizer.param_groups[0]['lr'], epoch+1)
+        writer.add_scalar('Time/Epoch', epoch_time, epoch+1)
         
         # Save checkpoint
         if (epoch + 1) % 10 == 0:
@@ -177,7 +210,13 @@ def main():
             # Log checkpoint event
             writer.add_text('Checkpoint', f"Saved at epoch {epoch+1}", epoch+1)
 
+    # Calculate total training time
+    total_training_time = time.time() - total_start_time
+    total_training_time_min = total_training_time / 60
+    total_training_time_h = total_training_time / 3600
+    
     print("\n--- Training Complete ---")
+    print(f"Total training time: {total_training_time:.2f}s ({total_training_time_min:.2f}min, {total_training_time_h:.2f}h)")
     
     # Close TensorBoard writer
     writer.close()

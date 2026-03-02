@@ -2,7 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-import math
+import math, sys, os
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(project_root)
+from models.utils import init_weights
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
@@ -267,3 +270,194 @@ class Unet3D(nn.Module):
 
         x = self.final_res_block(x, t)
         return self.final_conv(x)
+
+class UnetConv3(nn.Module):
+    def __init__(self, in_size, out_size, is_batchnorm, kernel_size=(3,3,1), padding_size=(1,1,0), init_stride=(1,1,1)):
+        super(UnetConv3, self).__init__()
+
+        if is_batchnorm:
+            self.conv1 = nn.Sequential(nn.Conv3d(in_size, out_size, kernel_size, init_stride, padding_size),
+                                       nn.InstanceNorm3d(out_size),
+                                       nn.ReLU(inplace=True),)
+            self.conv2 = nn.Sequential(nn.Conv3d(out_size, out_size, kernel_size, 1, padding_size),
+                                       nn.InstanceNorm3d(out_size),
+                                       nn.ReLU(inplace=True),)
+        else:
+            self.conv1 = nn.Sequential(nn.Conv3d(in_size, out_size, kernel_size, init_stride, padding_size),
+                                       nn.ReLU(inplace=True),)
+            self.conv2 = nn.Sequential(nn.Conv3d(out_size, out_size, kernel_size, 1, padding_size),
+                                       nn.ReLU(inplace=True),)
+
+        # initialise the blocks
+        for m in self.children():
+            init_weights(m, init_type='kaiming')
+
+    def forward(self, inputs):
+        outputs = self.conv1(inputs)
+        outputs = self.conv2(outputs)
+        return outputs
+    
+class Encoder(nn.Module):
+    def __init__(self, params):
+        super(Encoder, self).__init__()
+
+        self.params = params
+        self.is_batchnorm = self.params['is_batchnorm']
+        self.in_chns = self.params['in_chns']
+        self.ft_chns = self.params['feature_chns']
+        self.n_class = self.params['class_num']
+        
+        self.conv1 = UnetConv3(self.in_chns, self.ft_chns[0], self.is_batchnorm, kernel_size=(
+            3, 3, 3), padding_size=(1, 1, 1))
+        self.maxpool1 = nn.MaxPool3d(kernel_size=(2, 2, 2))
+
+        self.conv2 = UnetConv3(self.ft_chns[0], self.ft_chns[1], self.is_batchnorm, kernel_size=(
+            3, 3, 3), padding_size=(1, 1, 1))
+        self.maxpool2 = nn.MaxPool3d(kernel_size=(2, 2, 2))
+
+        self.conv3 = UnetConv3(self.ft_chns[1], self.ft_chns[2], self.is_batchnorm, kernel_size=(
+            3, 3, 3), padding_size=(1, 1, 1))
+        self.maxpool3 = nn.MaxPool3d(kernel_size=(2, 2, 2))
+
+        self.conv4 = UnetConv3(self.ft_chns[2], self.ft_chns[3], self.is_batchnorm, kernel_size=(
+            3, 3, 3), padding_size=(1, 1, 1))
+        self.maxpool4 = nn.MaxPool3d(kernel_size=(2, 2, 2))
+
+        self.center = UnetConv3(self.ft_chns[3], self.ft_chns[4], self.is_batchnorm, kernel_size=(
+            3, 3, 3), padding_size=(1, 1, 1))
+        
+        self.dropout = nn.Dropout(p=0.3)
+        
+    def forward(self, inputs):
+        conv1 = self.conv1(inputs)
+        maxpool1 = self.maxpool1(conv1)
+
+        conv2 = self.conv2(maxpool1)
+        maxpool2 = self.maxpool2(conv2)
+
+        conv3 = self.conv3(maxpool2)
+        maxpool3 = self.maxpool3(conv3)
+
+        conv4 = self.conv4(maxpool3)
+        maxpool4 = self.maxpool4(conv4)
+        
+        center = self.center(maxpool4)
+        center = self.dropout(center)
+        
+        return [conv1, conv2, conv3, conv4, center]
+
+class UnetUp3_CT(nn.Module):
+    def __init__(self, in_size, out_size, is_batchnorm=True):
+        super(UnetUp3_CT, self).__init__()
+        self.conv = UnetConv3(in_size + out_size, out_size, is_batchnorm, kernel_size=(3,3,3), padding_size=(1,1,1))
+        self.up = nn.Upsample(scale_factor=(2, 2, 2), mode='trilinear')
+
+        # initialise the blocks
+        for m in self.children():
+            if m.__class__.__name__.find('UnetConv3') != -1: continue
+            init_weights(m, init_type='kaiming')
+
+    def forward(self, inputs1, inputs2, deep=False):
+        outputs2 = self.up(inputs2)
+        offset = outputs2.size()[2] - inputs1.size()[2]
+        padding = 2 * [offset // 2, offset // 2, 0]
+        outputs1 = F.pad(inputs1, padding)
+        self.cat_feature = torch.cat([outputs1, outputs2], 1)
+        if deep:
+            return self.conv(self.cat_feature), self.cat_feature
+        return self.conv(self.cat_feature)
+    
+class Decoder_wtcls(nn.Module):
+    def __init__(self, params, in_channels=3, is_batchnorm=True):
+        super(Decoder_wtcls, self).__init__()
+        # self.is_batchnorm = is_batchnorm 
+        self.params = params
+        self.is_batchnorm = self.params['is_batchnorm']
+        self.ft_chns = self.params['feature_chns']
+        self.n_class = self.params['class_num']
+        # upsampling
+        self.up_concat4 = UnetUp3_CT(self.ft_chns[4], self.ft_chns[3], is_batchnorm)
+        self.up_concat3 = UnetUp3_CT(self.ft_chns[3], self.ft_chns[2], is_batchnorm)
+        self.up_concat2 = UnetUp3_CT(self.ft_chns[2], self.ft_chns[1], is_batchnorm)
+        self.up_concat1 = UnetUp3_CT(self.ft_chns[1], self.ft_chns[0], is_batchnorm)
+
+        # final conv (without any concat)
+        self.dropout = nn.Dropout(p=0.3)
+
+        # initialise weights
+        for m in self.modules():
+            if isinstance(m, nn.Conv3d):
+                init_weights(m, init_type='kaiming')
+            elif isinstance(m, nn.BatchNorm3d):
+                init_weights(m, init_type='kaiming')
+                
+    def forward(self, features, deep=False, consist=False):
+        conv1, conv2, conv3, conv4, center = features[:]
+        up4 = self.up_concat4(conv4, center)
+        up3 = self.up_concat3(conv3, up4)
+        up2 = self.up_concat2(conv2, up3)
+        up1 = self.up_concat1(conv1, up2, deep=deep)
+        if deep:
+            up1, feature_deep = up1[0], up1[1]
+        up1 = self.dropout(up1)
+        if deep and not consist:
+            return up1, feature_deep
+        elif deep and consist:
+            return center, up1, feature_deep
+        elif consist:
+            return center, up1
+        return up1
+    
+class unet_3D(nn.Module):
+    def __init__(self, in_chns, class_num, deep=False):
+        super(unet_3D, self).__init__()
+        params = {'in_chns': in_chns,
+                  'is_batchnorm': True,
+                  'feature_scale': 4,
+                  'feature_chns': [16, 32, 64, 128, 256],
+                  'class_num': class_num,
+                  'bilinear': False,
+                  'acti_func': 'relu'}
+        self.deep = deep
+        self.params = params
+        self.encoder = Encoder(self.params)
+        self.decoder = Decoder_wtcls(self.params)
+        self.classifier = nn.Conv3d(self.params['feature_chns'][0], class_num, 1)
+
+    def forward(self, inputs, comp_drop=None, feature_need=False, consist=False):
+        features = self.encoder(inputs)
+        if comp_drop != None:
+            for i in range(0, len(features)):
+                features[i] = features[i] * comp_drop[i].unsqueeze(2).unsqueeze(3).unsqueeze(4)
+            
+            out = self.decoder(features)
+            return out
+        feature_final = self.decoder(features, deep=self.deep, consist=consist)
+        if not self.deep and consist:
+            center, feature_final = feature_final[0], feature_final[1]
+        if self.deep and not consist:
+            feature_final, deep_feature = feature_final[0], feature_final[1]
+        elif self.deep and consist:
+            center, feature_final, deep_feature = feature_final[0], feature_final[1], feature_final[2]
+        out = self.classifier(feature_final)
+        if feature_need and self.deep:
+            if consist:
+                return out, center, deep_feature
+            return out, deep_feature
+        elif feature_need and not self.deep:
+            if consist:
+                return out, center, feature_final
+            return out, feature_final
+        return out
+
+    @staticmethod
+    def apply_argmax_softmax(pred):
+        log_p = F.softmax(pred, dim=1)
+
+        return log_p
+
+    def lock_backbone(self):
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+        for p in self.decoder.parameters():
+            p.requires_grad = False
