@@ -37,6 +37,7 @@ def main():
     beijing_tz = pytz.timezone('Asia/Shanghai')
     beijing_time = datetime.datetime.now(beijing_tz)
     config['timestamp'] = beijing_time.strftime("%Y-%m-%d-%H:%M:%S")
+    print(f"Now (Beijing): {config['timestamp']}")
     config['base_dir'] = os.path.join(config['base_dir'], config['timestamp'])
     config['log_dir'] = config['log_dir'].replace("${base_dir}", config['base_dir'])
     config['checkpoint_dir'] = config['checkpoint_dir'].replace("${base_dir}", config['base_dir'])
@@ -357,15 +358,35 @@ def main():
                         remaining = n_samples - collected
                         if real_videos.size(0) > remaining:
                             real_videos = real_videos[:remaining]
-                        fake_videos = diffusion.sample(
-                            (real_videos.size(0), config['channels'], config['time_steps'], config['image_size'], config['image_size'])
-                        )
-                        if stat_file is None:
-                            real_feat = extract_features_from_videos(real_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
-                            real_features_list.append(real_feat)
-                        fake_feat = extract_features_from_videos(fake_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
-                        fake_features_list.append(fake_feat)
-                        collected += real_videos.size(0)
+                        
+                        # 参数验证
+                        if real_videos.size(0) == 0:
+                            print(f"警告：批次 {i} 为空，跳过")
+                            continue
+                            
+                        try:
+                            fake_videos = diffusion.sample(
+                                (real_videos.size(0), config['channels'], config['time_steps'], config['image_size'], config['image_size'])
+                            )
+                            
+                            if stat_file is None:
+                                real_feat = extract_features_from_videos(real_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
+                                if real_feat is not None:
+                                    real_features_list.append(real_feat)
+                                    collected += real_videos.size(0)
+                                else:
+                                    print(f"警告：批次 {i} 真实视频特征提取失败，跳过")
+                            
+                            fake_feat = extract_features_from_videos(fake_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
+                            if fake_feat is not None:
+                                fake_features_list.append(fake_feat)
+                            else:
+                                print(f"警告：批次 {i} 生成视频特征提取失败，跳过")
+                                
+                        except Exception as e:
+                            print(f"批次 {i} 处理失败: {e}")
+                            continue
+                        pass
                 fake_features = torch.cat(fake_features_list, dim=0)
                 real_features = torch.cat(real_features_list, dim=0) if real_features_list else None
                 fid_score = compute_fid_from_features(fake_features, real_features=real_features, stat_file=stat_file)
@@ -431,6 +452,8 @@ def main():
     
     print("\n--- Training Complete ---")
     print(f"Total training time: {total_training_time:.2f}s ({total_training_time_min:.2f}min, {total_training_time_h:.2f}h)")
+    end_time = datetime.datetime.now(beijing_tz)
+    print(f"End time (Beijing): {end_time.strftime('%Y-%m-%d-%H:%M:%S')}")
     
     # Close TensorBoard writer
     writer.close()
