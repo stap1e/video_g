@@ -30,7 +30,13 @@ def main():
     # Load configuration
     from omegaconf import OmegaConf
     config = OmegaConf.load("config.yaml")
-    config['timestamp'] = time.strftime("%Y-%m-%d-%H-%M-%S")
+    import datetime
+    import pytz
+
+    # 获取北京时间
+    beijing_tz = pytz.timezone('Asia/Shanghai')
+    beijing_time = datetime.datetime.now(beijing_tz)
+    config['timestamp'] = beijing_time.strftime("%Y-%m-%d-%H:%M:%S")
     config['base_dir'] = os.path.join(config['base_dir'], config['timestamp'])
     config['log_dir'] = config['log_dir'].replace("${base_dir}", config['base_dir'])
     config['checkpoint_dir'] = config['checkpoint_dir'].replace("${base_dir}", config['base_dir'])
@@ -295,8 +301,8 @@ def main():
             ssim_scores = []
             
             with torch.no_grad():
-                eval_pbar = tqdm(test_loader, total=num_eval_batches, desc=f"FVD/FID {epoch+1}/{config['epochs']}", ncols=80)
-                for i, batch in enumerate(eval_pbar):
+                pbar = tqdm(enumerate(test_loader), total=num_eval_batches, desc="FVD/FID Evaluation", ncols=80)
+                for i, batch in pbar:
                     if i >= num_eval_batches:
                         break
                         
@@ -343,7 +349,8 @@ def main():
                 fake_features_list = []
                 collected = 0
                 with torch.no_grad():
-                    for batch in test_loader:
+                    pbar = tqdm(test_loader, desc="FVD/FID Evaluation", leave=False, ncols=80)
+                    for batch in pbar:
                         if collected >= n_samples:
                             break
                         real_videos = batch.to(device)
@@ -387,7 +394,7 @@ def main():
                 # Save best weights
                 best_checkpoint = os.path.join(
                     config['checkpoint_dir'],
-                    f"best_ep-{best_epoch}_fvd-{best_fvd:.6f}_fid-{best_fid:.6f}.pth"
+                    f"best_ep-{best_epoch}_fvd-{best_fvd:.3f}_fid-{best_fid:.3f}.pth"
                 )
                 torch.save(model.state_dict(), best_checkpoint)
                 print(f"New best model saved at epoch {best_epoch}")

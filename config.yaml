@@ -15,9 +15,10 @@ code_save_dir: "codes"
 items_to_save: [
     {"type": "file", "path": "config.yaml"},
     {"type": "file", "path": "main.py"},
-    {"type": "file", "path": "dataloader.py"},
+    {"type": "file", "path": "run_training.sh"},
     {"type": "dir", "path": "models"},
     {"type": "dir", "path": "tools"},
+    {"type": "dir", "path": "utils"},
 ]
 
 # Training parameters
