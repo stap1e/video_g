@@ -17,7 +17,9 @@ def main():
         from models.unet import unet_3D
         from models.diffusion import GaussianDiffusion
         from utils.dataloader import UCF101Dataset
-        from utils.metrics import compute_fvd, compute_fid
+        from utils.metrics import compute_fvd, compute_fid, compute_lpips, compute_psnr, compute_ssim
+        from utils.fid import extract_features_from_videos, compute_fid_from_features
+        from utils.inception_score import compute_inception_score_from_sampler
     except ImportError as e:
         print("Error: Required libraries not found.")
         print(f"Details: {e}")
@@ -280,11 +282,17 @@ def main():
             print(f"Epoch {epoch+1}/{config['epochs']}, Validation Loss: {avg_val_loss:.6f}")
             writer.add_scalar('Loss/Validation', avg_val_loss, epoch+1)
             
+            fid_conf = config.get('fid_score', None)
+            is_conf = config.get('inception_score', None)
+
             # Compute FVD and FID on multiple batches
             model.eval()
             num_eval_batches = 5
             fvd_scores = []
             fid_scores = []
+            lpips_scores = []
+            psnr_scores = []
+            ssim_scores = []
             
             with torch.no_grad():
                 eval_pbar = tqdm(test_loader, total=num_eval_batches, desc=f"FVD/FID {epoch+1}/{config['epochs']}", ncols=80)
@@ -303,14 +311,72 @@ def main():
                     
                     # Compute metrics
                     fvd_score = compute_fvd(real_videos, fake_videos, device=device)
-                    fid_score = compute_fid(real_videos[:, :, 0, :, :], fake_videos[:, :, 0, :, :], device=device)
+                    real_frames = real_videos[:, :, 0, :, :]
+                    fake_frames = fake_videos[:, :, 0, :, :]
+                    if fid_conf is None:
+                        fid_score = compute_fid(real_frames, fake_frames, device=device)
+                    lpips_score = compute_lpips(real_frames, fake_frames, device=device)
+                    psnr_score = compute_psnr(real_frames, fake_frames)
+                    ssim_score = compute_ssim(real_frames, fake_frames)
                     
                     fvd_scores.append(fvd_score)
-                    fid_scores.append(fid_score)
+                    if fid_conf is None:
+                        fid_scores.append(fid_score)
+                    lpips_scores.append(lpips_score)
+                    psnr_scores.append(psnr_score)
+                    ssim_scores.append(ssim_score)
             
             # Average metrics
             avg_fvd = sum(fvd_scores) / len(fvd_scores)
-            avg_fid = sum(fid_scores) / len(fid_scores)
+            avg_fid = sum(fid_scores) / len(fid_scores) if fid_scores else float("inf")
+            avg_lpips = sum(lpips_scores) / len(lpips_scores)
+            avg_psnr = sum(psnr_scores) / len(psnr_scores)
+            avg_ssim = sum(ssim_scores) / len(ssim_scores)
+
+            fid_score = None
+            if fid_conf is not None:
+                n_samples = int(fid_conf.get('n_samples', num_eval_batches * config['batch_size']))
+                n_frames = fid_conf.get('n_frames', None)
+                stat_file = fid_conf.get('stat_file', None)
+                feat_batch = int(fid_conf.get('batchsize', config['batch_size']))
+                real_features_list = []
+                fake_features_list = []
+                collected = 0
+                with torch.no_grad():
+                    for batch in test_loader:
+                        if collected >= n_samples:
+                            break
+                        real_videos = batch.to(device)
+                        remaining = n_samples - collected
+                        if real_videos.size(0) > remaining:
+                            real_videos = real_videos[:remaining]
+                        fake_videos = diffusion.sample(
+                            (real_videos.size(0), config['channels'], config['time_steps'], config['image_size'], config['image_size'])
+                        )
+                        if stat_file is None:
+                            real_feat = extract_features_from_videos(real_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
+                            real_features_list.append(real_feat)
+                        fake_feat = extract_features_from_videos(fake_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
+                        fake_features_list.append(fake_feat)
+                        collected += real_videos.size(0)
+                fake_features = torch.cat(fake_features_list, dim=0)
+                real_features = torch.cat(real_features_list, dim=0) if real_features_list else None
+                fid_score = compute_fid_from_features(fake_features, real_features=real_features, stat_file=stat_file)
+                avg_fid = fid_score
+
+            is_mean = None
+            is_std = None
+            if is_conf is not None:
+                is_mean, is_std = compute_inception_score_from_sampler(
+                    sample_fn=lambda n: diffusion.sample(
+                        (n, config['channels'], config['time_steps'], config['image_size'], config['image_size'])
+                    ),
+                    n_samples=int(is_conf.get('n_samples', 1000)),
+                    batchsize=int(is_conf.get('batchsize', 32)),
+                    n_frames=is_conf.get('n_frames', None),
+                    splits=int(is_conf.get('splits', 10)),
+                    device=device
+                )
             
             # Update best metrics (double optimal: both FVD and FID should improve)
             is_best = avg_fvd < best_fvd and avg_fid < best_fid
@@ -319,7 +385,10 @@ def main():
                 best_fid = avg_fid
                 best_epoch = epoch + 1
                 # Save best weights
-                best_checkpoint = os.path.join(config['checkpoint_dir'], "best.pth")
+                best_checkpoint = os.path.join(
+                    config['checkpoint_dir'],
+                    f"best_ep-{best_epoch}_fvd-{best_fvd:.6f}_fid-{best_fid:.6f}.pth"
+                )
                 torch.save(model.state_dict(), best_checkpoint)
                 print(f"New best model saved at epoch {best_epoch}")
             
@@ -327,12 +396,23 @@ def main():
             print(f"Epoch {epoch+1}/{config['epochs']}:")
             print(f"  Average FVD: {avg_fvd:.6f} (Best: {best_fvd:.6f} at epoch {best_epoch})")
             print(f"  Average FID: {avg_fid:.6f} (Best: {best_fid:.6f} at epoch {best_epoch})")
+            print(f"  Average LPIPS: {avg_lpips:.6f}")
+            print(f"  Average PSNR: {avg_psnr:.6f}")
+            print(f"  Average SSIM: {avg_ssim:.6f}")
+            if is_mean is not None:
+                print(f"  Inception Score: {is_mean:.6f} ± {is_std:.6f}")
             
             # Log metrics
             writer.add_scalar('Metrics/Average_FVD', avg_fvd, epoch+1)
             writer.add_scalar('Metrics/Average_FID', avg_fid, epoch+1)
             writer.add_scalar('Metrics/Best_FVD', best_fvd, epoch+1)
             writer.add_scalar('Metrics/Best_FID', best_fid, epoch+1)
+            writer.add_scalar('Metrics/Average_LPIPS', avg_lpips, epoch+1)
+            writer.add_scalar('Metrics/Average_PSNR', avg_psnr, epoch+1)
+            writer.add_scalar('Metrics/Average_SSIM', avg_ssim, epoch+1)
+            if is_mean is not None:
+                writer.add_scalar('Metrics/Inception_Score_Mean', is_mean, epoch+1)
+                writer.add_scalar('Metrics/Inception_Score_Std', is_std, epoch+1)
             
             # Switch back to train mode
             model.train()

@@ -41,3 +41,23 @@ objective: "pred_x0"
 
 # Reconstruction guidance
 w_r: 10.0
+inception_score:
+  classifier:
+    name: C3DVersion1UCF101
+    args:
+      pretrained_model: datasets/models/conv3d_deepnetA_ucf.npz
+  batchsize: 1
+  n_samples: 2048
+  splits: 1
+  interval: 2000
+  n_frames: 16
+fid_score:
+  classifier:
+    name: C3DVersion1UCF101
+    args:
+      pretrained_model: datasets/models/conv3d_deepnetA_ucf.npz
+  stat_file: datasets/fid_stats_ucf101.npz
+  batchsize: 1
+  n_samples: 2048
+  interval: 2000
+  n_frames: 16
