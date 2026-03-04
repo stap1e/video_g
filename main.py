@@ -396,13 +396,13 @@ def main():
                 if not fake_features_list:
                     print("错误：未提取到任何生成视频特征")
                     return
-                    fake_features = torch.cat(fake_features_list, dim=0)
-                       
-                    if stat_file is None:
-                        if not real_features_list:
-                            print("错误：未提取到任何真实视频特征")
-                            return
-                            real_features = torch.cat(real_features_list, dim=0)
+                fake_features = torch.cat(fake_features_list, dim=0)
+                    
+                if stat_file is None:
+                    if not real_features_list:
+                        print("错误：未提取到任何真实视频特征")
+                        return
+                real_features = torch.cat(real_features_list, dim=0)
                 fid_score = compute_fid_from_features(fake_features, real_features=real_features, stat_file=stat_file)
                 avg_fid = fid_score
 
