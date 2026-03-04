@@ -383,7 +383,7 @@ def main():
                             
                             fake_feat = extract_features_from_videos(fake_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
                             if fake_feat is not None:
-                                fake_features_list.append(fake_feat)
+                                pass
                             else:
                                 print(f"警告：批次 {i} 生成视频特征提取失败，跳过")
                                 print("特征提取失败")
@@ -393,8 +393,16 @@ def main():
                             print(f"批次 {i} 处理失败: {e}")
                             continue
                         pass
-                fake_features = torch.cat(fake_features_list, dim=0)
-                real_features = torch.cat(real_features_list, dim=0) if real_features_list else None
+                if not fake_features_list:
+                    print("错误：未提取到任何生成视频特征")
+                    return
+                    fake_features = torch.cat(fake_features_list, dim=0)
+                       
+                    if stat_file is None:
+                        if not real_features_list:
+                            print("错误：未提取到任何真实视频特征")
+                            return
+                            real_features = torch.cat(real_features_list, dim=0)
                 fid_score = compute_fid_from_features(fake_features, real_features=real_features, stat_file=stat_file)
                 avg_fid = fid_score
 

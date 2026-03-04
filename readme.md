@@ -7,16 +7,6 @@
 
 ## Datasets
 
-### Template
-```
-- **Dataset Name**: 
-  - **Description**: 
-  - **Size**: 
-  - **Format**: 
-  - **Source**: 
-  - **License**: 
-```
-
 ### Example
 ```
 - **Dataset Name**: UCF101
@@ -25,6 +15,36 @@
   - **Format**: AVI
   - **Source**: https://www.crcv.ucf.edu/data/UCF101.php
   - **License**: MIT
+```
+
+### Example
+```
+- **Dataset Name**: Kinetics 600
+  - **Description**:
+  - **Size**:  videos
+  - **Format**: 
+  - **Source**: https://opendatalab.com/OpenMMLab/Kinetics600/
+  - **License**: 
+```
+
+### Example
+```
+- **Dataset Name**: BAIR_robot_pushing_dataset_v0
+  - **Description**:
+  - **Size**:  videos
+  - **Format**: 
+  - **Source**: http://www.google.com/url?q=http%3A%2F%2Frail.eecs.berkeley.edu%2Fdatasets%2Fbair_robot_pushing_dataset_v0.tar&sa=D&sntz=1&usg=AOvVaw3nXoeXKb5FbfJZIUaMX0p_
+  - **License**: 
+```
+
+### Example
+```
+- **Dataset Name**: Kinetics 600
+  - **Description**:
+  - **Size**:  videos
+  - **Format**: 
+  - **Source**: https://opendatalab.com/OpenMMLab/Kinetics600/
+  - **License**: 
 ```
 
 ## Training Configuration
