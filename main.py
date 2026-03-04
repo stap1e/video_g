@@ -345,6 +345,8 @@ def main():
                 n_samples = int(fid_conf.get('n_samples', num_eval_batches * config['batch_size']))
                 n_frames = fid_conf.get('n_frames', None)
                 stat_file = fid_conf.get('stat_file', None)
+                if stat_file is not None and not os.path.exists(stat_file):
+                    stat_file = None
                 feat_batch = int(fid_conf.get('batchsize', config['batch_size']))
                 real_features_list = []
                 fake_features_list = []
@@ -376,12 +378,16 @@ def main():
                                     collected += real_videos.size(0)
                                 else:
                                     print(f"警告：批次 {i} 真实视频特征提取失败，跳过")
+                                    print("特征提取失败")
+                                    return
                             
                             fake_feat = extract_features_from_videos(fake_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
                             if fake_feat is not None:
                                 fake_features_list.append(fake_feat)
                             else:
                                 print(f"警告：批次 {i} 生成视频特征提取失败，跳过")
+                                print("特征提取失败")
+                                return
                                 
                         except Exception as e:
                             print(f"批次 {i} 处理失败: {e}")

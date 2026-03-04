@@ -55,11 +55,14 @@ def extract_features_from_videos(videos, device="cuda", batchsize=32, n_frames=N
 
 
 def compute_fid_from_features(fake_features, real_features=None, stat_file=None):
-    if stat_file and os.path.exists(stat_file):
+    use_stat = stat_file is not None and os.path.exists(stat_file)
+    if use_stat:
         stat = np.load(stat_file)
         mu_real = stat["mean"]
         sigma_real = stat["cov"]
     else:
+        if real_features is None or real_features.size(0) == 0:
+            raise ValueError("真实视频特征为空，请检查特征提取过程")
         mu_real = real_features.mean(dim=0).cpu().numpy()
         sigma_real = np.cov(real_features.cpu().numpy(), rowvar=False)
     mu_fake = fake_features.mean(dim=0).cpu().numpy()
