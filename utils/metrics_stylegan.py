@@ -12,7 +12,7 @@ import json
 import torch
 import numpy as np
 from utils import dnnlib_utils
-dnnlib = dnnlib_utils.dnnlib
+dnnlib = dnnlib_utils
 
 from . import metrics_stylegan_utils
 metric_utils = metrics_stylegan_utils

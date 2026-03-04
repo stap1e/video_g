@@ -18,7 +18,7 @@ import numpy as np
 import PIL.Image
 import torch
 from utils import dnnlib_utils
-dnnlib = dnnlib_utils.dnnlib
+dnnlib = dnnlib_utils
 from omegaconf import DictConfig, OmegaConf
 
 from utils.datasets_layers_stylegan import sample_frames

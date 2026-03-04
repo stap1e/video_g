@@ -7,7 +7,8 @@ up to the upsampling operation. Note that this tf.hub I3D model is different fro
 import copy
 import numpy as np
 import scipy.linalg
-from . import metric_utils
+from . import metrics_stylegan_utils
+metric_utils = metrics_stylegan_utils
 
 #----------------------------------------------------------------------------
 

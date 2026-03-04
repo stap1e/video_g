@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import numpy as np
 import torch
 from utils import dnnlib_utils
-dnnlib = dnnlib_utils.dnnlib
+dnnlib = dnnlib_utils
 from utils.datasets_stylegan import video_to_image_dataset_kwargs
 
 #----------------------------------------------------------------------------
