@@ -74,7 +74,7 @@ def calc_metric(metric, num_runs: int=1, **kwargs): # See metric_utils.MetricOpt
         results         = dnnlib.EasyDict(results),
         metric          = metric,
         total_time      = total_time,
-        total_time_str  = dnnlib.util.format_time(total_time),
+        total_time_str  = dnnlib.format_time(total_time),
         num_gpus        = opts.num_gpus,
     )
 

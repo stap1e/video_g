@@ -8,16 +8,14 @@ metric_utils = metrics_stylegan_utils
 
 #----------------------------------------------------------------------------
 
-NUM_FRAMES_IN_BATCH = {128: 128, 256: 128, 512: 64, 1024: 32}
+NUM_FRAMES_IN_BATCH = {64: 256, 128: 128, 256: 128, 512: 64, 1024: 32}
 
 #----------------------------------------------------------------------------
 
-def compute_isv(opts, num_gen: int, num_splits: int, backbone: str):
+def compute_isv(opts, num_gen: int, num_splits: int, backbone: str, detector_url: str | None = None):
     if backbone == 'c3d_ucf101':
-        # Perfectly reproduced torchscript version of the original chainer checkpoint:
-        # https://github.com/pfnet-research/tgan2/blob/f892bc432da315d4f6b6ae9448f69d046ef6fe01/tgan2/models/c3d/c3d_ucf101.py
-        # It is a UCF-101-finetuned C3D model.
-        detector_url = 'https://www.dropbox.com/s/jxpu7avzdc9n97q/c3d_ucf101.pt?dl=1'
+        if detector_url is None:
+            detector_url = 'https://www.dropbox.com/s/jxpu7avzdc9n97q/c3d_ucf101.pt?dl=1'
     else:
         raise NotImplementedError(f'Backbone {backbone} is not supported.')
 

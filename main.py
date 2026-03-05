@@ -17,9 +17,9 @@ def main():
         from models.unet import unet_3D
         from models.diffusion import GaussianDiffusion
         from utils.dataloader import UCF101Dataset
-        from utils.metrics import compute_fvd, compute_fid, compute_lpips, compute_psnr, compute_ssim
+        from utils.metrics import compute_fid, compute_lpips, compute_psnr, compute_ssim
         from utils.fid import extract_features_from_videos, compute_fid_from_features
-        from utils.inception_score import compute_inception_score_from_sampler
+        from utils import frechet_video_distance, video_inception_score, metrics_stylegan_utils
     except ImportError as e:
         print("Error: Required libraries not found.")
         print(f"Details: {e}")
@@ -158,6 +158,24 @@ def main():
 
     print("Diffusion initialized.")
 
+    class DiffusionMetricGenerator(torch.nn.Module):
+        def __init__(self, diffusion, channels, image_size, time_steps):
+            super().__init__()
+            self.diffusion = diffusion
+            self.channels = channels
+            self.image_size = image_size
+            self.time_steps = time_steps
+            self.z_dim = 1
+            self.c_dim = 0
+
+        def forward(self, z, c, t, **_):
+            batch = z.size(0)
+            num_frames = t.size(1) if t is not None and t.ndim > 1 else self.time_steps
+            videos = self.diffusion.sample(
+                (batch, self.channels, num_frames, self.image_size, self.image_size)
+            )
+            return videos.permute(0, 2, 1, 3, 4).reshape(batch * num_frames, self.channels, self.image_size, self.image_size)
+
     # Initialize DataLoaders
     print("\n--- Initializing DataLoaders ---")
     
@@ -273,10 +291,11 @@ def main():
         print(f"Latest checkpoint saved to {latest_checkpoint}")
         
         # Validation every 5 epochs
-        if (epoch + 1) % 1 == 0:
+        if (epoch + 1) % 2 == 0 and (epoch + 1) >= config['epochs'] * 0.7:
             model.eval()
             val_loss = 0.0
             
+            model.eval()
             with torch.no_grad():
                 val_pbar = tqdm(test_loader, desc=f"Val {epoch+1}/{config['epochs']}", ncols=80)
                 for batch in val_pbar:
@@ -291,11 +310,11 @@ def main():
             
             fid_conf = config.get('fid_score', None)
             is_conf = config.get('inception_score', None)
+            fvd_conf = config.get('fvd_score', None)
 
             # Compute FVD and FID on multiple batches
             model.eval()
             num_eval_batches = 5
-            fvd_scores = []
             fid_scores = []
             lpips_scores = []
             psnr_scores = []
@@ -308,16 +327,13 @@ def main():
                         break
                         
                     real_videos = batch.to(device)
-                    sample_shape = tuple(real_videos.shape)
-                    print(f"[shape-debug] real_videos={sample_shape} sample_shape={sample_shape}")
-                    fake_videos = diffusion.sample(sample_shape)
+                    fake_videos = diffusion.sample(tuple(real_videos.shape))
                     # Generate fake videos using diffusion
                     # fake_videos = diffusion.sample(
                     #     (real_videos.size(0), config['channels'], config['time_steps'], config['image_size'], config['image_size'])
                     # )
                     
                     # Compute metrics
-                    fvd_score = compute_fvd(real_videos, fake_videos, device=device)
                     real_frames = real_videos[:, :, 0, :, :]
                     fake_frames = fake_videos[:, :, 0, :, :]
                     if fid_conf is None:
@@ -326,7 +342,6 @@ def main():
                     psnr_score = compute_psnr(real_frames, fake_frames)
                     ssim_score = compute_ssim(real_frames, fake_frames)
                     
-                    fvd_scores.append(fvd_score)
                     if fid_conf is None:
                         fid_scores.append(fid_score)
                     lpips_scores.append(lpips_score)
@@ -334,11 +349,53 @@ def main():
                     ssim_scores.append(ssim_score)
             
             # Average metrics
-            avg_fvd = sum(fvd_scores) / len(fvd_scores)
+            avg_fvd = float("inf")
             avg_fid = sum(fid_scores) / len(fid_scores) if fid_scores else float("inf")
             avg_lpips = sum(lpips_scores) / len(lpips_scores)
             avg_psnr = sum(psnr_scores) / len(psnr_scores)
             avg_ssim = sum(ssim_scores) / len(ssim_scores)
+
+            metric_generator = DiffusionMetricGenerator(
+                diffusion,
+                channels=config['channels'],
+                image_size=config['image_size'],
+                time_steps=config['time_steps']
+            ).to(device)
+            dataset_kwargs = dict(
+                class_name="utils.datasets_stylegan.UCF101StyleganDataset",
+                data_path=config['data_path'],
+                image_size=config['image_size'],
+                time_steps=config['time_steps'],
+                split_file=config['test_split_path'],
+                resolution=config['image_size']
+            )
+            metric_opts = metrics_stylegan_utils.MetricOptions(
+                G=metric_generator,
+                dataset_kwargs=dataset_kwargs,
+                num_gpus=1,
+                rank=0,
+                device=torch.device(device),
+                cache=False
+            )
+
+            fvd_samples = int((fvd_conf or fid_conf or {}).get('n_samples', num_eval_batches * config['batch_size']))
+            fvd_frames = int((fvd_conf or {}).get('n_frames', config['time_steps']))
+            fvd_subsample = int((fvd_conf or {}).get('subsample_factor', 1))
+            fvd_detector_path = (fvd_conf or {}).get('detector_path', None)
+            fvd_detector_url = (fvd_conf or {}).get('detector_url', None)
+            if fvd_detector_path and os.path.exists(fvd_detector_path):
+                fvd_detector_url = f"file://{os.path.abspath(fvd_detector_path)}"
+            try:
+                avg_fvd = frechet_video_distance.compute_fvd(
+                    metric_opts,
+                    max_real=fvd_samples,
+                    num_gen=fvd_samples,
+                    num_frames=fvd_frames,
+                    subsample_factor=fvd_subsample,
+                    detector_url=fvd_detector_url
+                )
+            except Exception as e:
+                print(f"警告：FVD 计算失败，已跳过。原因：{e}")
 
             fid_score = None
             if fid_conf is not None:
@@ -353,7 +410,7 @@ def main():
                 collected = 0
                 with torch.no_grad():
                     pbar = tqdm(test_loader, desc="FVD/FID Evaluation", leave=False, ncols=80)
-                    for batch in pbar:
+                    for i, batch in enumerate(pbar):
                         if collected >= n_samples:
                             break
                         real_videos = batch.to(device)
@@ -375,7 +432,6 @@ def main():
                                 real_feat = extract_features_from_videos(real_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
                                 if real_feat is not None:
                                     real_features_list.append(real_feat)
-                                    collected += real_videos.size(0)
                                 else:
                                     print(f"警告：批次 {i} 真实视频特征提取失败，跳过")
                                     print("特征提取失败")
@@ -383,42 +439,48 @@ def main():
                             
                             fake_feat = extract_features_from_videos(fake_videos, device=device, batchsize=feat_batch, n_frames=n_frames)
                             if fake_feat is not None:
-                                pass
+                                fake_features_list.append(fake_feat)
                             else:
                                 print(f"警告：批次 {i} 生成视频特征提取失败，跳过")
                                 print("特征提取失败")
                                 return
+                            collected += real_videos.size(0)
                                 
                         except Exception as e:
                             print(f"批次 {i} 处理失败: {e}")
                             continue
                         pass
                 if not fake_features_list:
-                    print("错误：未提取到任何生成视频特征")
+                    print("错误：未提取到任何生成视频特征 1 ")
                     return
                 fake_features = torch.cat(fake_features_list, dim=0)
                     
+                real_features = None
                 if stat_file is None:
                     if not real_features_list:
-                        print("错误：未提取到任何真实视频特征")
+                        print("错误：未提取到任何真实视频特征 2")
                         return
-                real_features = torch.cat(real_features_list, dim=0)
+                    real_features = torch.cat(real_features_list, dim=0)
                 fid_score = compute_fid_from_features(fake_features, real_features=real_features, stat_file=stat_file)
                 avg_fid = fid_score
 
             is_mean = None
             is_std = None
             if is_conf is not None:
-                is_mean, is_std = compute_inception_score_from_sampler(
-                    sample_fn=lambda n: diffusion.sample(
-                        (n, config['channels'], config['time_steps'], config['image_size'], config['image_size'])
-                    ),
-                    n_samples=int(is_conf.get('n_samples', 1000)),
-                    batchsize=int(is_conf.get('batchsize', 32)),
-                    n_frames=is_conf.get('n_frames', None),
-                    splits=int(is_conf.get('splits', 10)),
-                    device=device
-                )
+                is_detector_path = is_conf.get('detector_path', None)
+                is_detector_url = is_conf.get('detector_url', None)
+                if is_detector_path and os.path.exists(is_detector_path):
+                    is_detector_url = f"file://{os.path.abspath(is_detector_path)}"
+                try:
+                    is_mean, is_std = video_inception_score.compute_isv(
+                        metric_opts,
+                        num_gen=int(is_conf.get('n_samples', 1000)),
+                        num_splits=int(is_conf.get('splits', 10)),
+                        backbone='c3d_ucf101',
+                        detector_url=is_detector_url
+                    )
+                except Exception as e:
+                    print(f"警告：IS 计算失败，已跳过。原因：{e}")
             
             # Update best metrics (double optimal: both FVD and FID should improve)
             is_best = avg_fvd < best_fvd and avg_fid < best_fid

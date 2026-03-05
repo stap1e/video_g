@@ -17,6 +17,7 @@ from typing import Tuple
 import numpy as np
 import PIL.Image
 import torch
+from torchvision import transforms
 from utils import dnnlib_utils
 dnnlib = dnnlib_utils
 from omegaconf import DictConfig, OmegaConf
@@ -32,6 +33,39 @@ except ImportError:
 
 NUMPY_INTEGER_TYPES = [np.int8, np.int16, np.int32, np.int64, np.uint8, np.uint16, np.uint32, np.uint64]
 NUMPY_FLOAT_TYPES = [np.float16, np.float32, np.float64, np.single, np.double]
+
+class UCF101StyleganDataset(torch.utils.data.Dataset):
+    def __init__(self, data_path, image_size=64, time_steps=16, split_file=None, **_):
+        from utils.dataloader import UCF101Dataset
+        transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        ])
+        self._name = "ucf101"
+        self.dataset = UCF101Dataset(
+            data_path=data_path,
+            image_size=image_size,
+            time_steps=time_steps,
+            transform=transform,
+            split_file=split_file
+        )
+
+    @property
+    def name(self):
+        return self._name
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def get_label(self, _idx):
+        return np.zeros([0], dtype=np.float32)
+
+    def __getitem__(self, idx):
+        video = self.dataset[idx]
+        video = video.permute(1, 0, 2, 3)
+        return {'image': video, 'label': self.get_label(idx)}
 
 #----------------------------------------------------------------------------
 

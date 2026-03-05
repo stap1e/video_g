@@ -47,11 +47,7 @@ class GaussianDiffusion(nn.Module):
 
     def q_posterior(self, x_start, x_t, t):
         if x_start.shape != x_t.shape:
-            print(f"[shape-debug] x_start={tuple(x_start.shape)} x_t={tuple(x_t.shape)} t={tuple(t.shape)}")
-            if x_start.dim() == 5 and x_t.dim() == 5:
-                x_start = F.interpolate(x_start, size=x_t.shape[2:], mode="trilinear", align_corners=False)
-            elif x_start.dim() == 4 and x_t.dim() == 4:
-                x_start = F.interpolate(x_start, size=x_t.shape[2:], mode="bilinear", align_corners=False)
+            raise ValueError(f"q_posterior shape mismatch: x_start={tuple(x_start.shape)} x_t={tuple(x_t.shape)}")
         coef1 = self.posterior_mean_coef1[t].view(-1, 1, 1, 1, 1)
         coef2 = self.posterior_mean_coef2[t].view(-1, 1, 1, 1, 1)
         posterior_mean = coef1 * x_start + coef2 * x_t
@@ -78,8 +74,7 @@ class GaussianDiffusion(nn.Module):
             else:
                 model_output = self.model(x, t)
         if model_output.shape != x.shape:
-            if model_output.dim() == 5 and x.dim() == 5:
-                model_output = F.interpolate(model_output, size=x.shape[2:], mode="trilinear", align_corners=False)
+            raise ValueError(f"model_output shape mismatch: model_output={tuple(model_output.shape)} x={tuple(x.shape)}")
 
         if self.objective == 'pred_noise':
             x_start = self.predict_start_from_noise(x, t=t, noise=model_output)
@@ -89,8 +84,7 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'unknown objective {self.objective}')
 
         if x_start.shape != x.shape:
-            if x_start.dim() == 5 and x.dim() == 5:
-                x_start = F.interpolate(x_start, size=x.shape[2:], mode="trilinear", align_corners=False)
+            raise ValueError(f"x_start shape mismatch: x_start={tuple(x_start.shape)} x={tuple(x.shape)}")
         if clip_denoised:
             x_start.clamp_(-1., 1.)
 

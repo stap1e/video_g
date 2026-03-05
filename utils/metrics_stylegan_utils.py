@@ -50,7 +50,7 @@ def get_feature_detector(url, device=torch.device('cpu'), num_gpus=1, rank=0, ve
         is_leader = (rank == 0)
         if not is_leader and num_gpus > 1:
             torch.distributed.barrier() # leader goes first
-        with dnnlib.util.open_url(url, verbose=(verbose and is_leader)) as f:
+        with dnnlib.open_url(url, verbose=(verbose and is_leader)) as f:
             if urlparse(url).path.endswith('.pkl'):
                 _feature_detector_cache[key] = pickle.load(f).to(device)
             else:
@@ -165,7 +165,7 @@ class ProgressMonitor:
         total_time = cur_time - self.start_time
         time_per_item = (cur_time - self.batch_time) / max(cur_items - self.batch_items, 1)
         if (self.verbose) and (self.tag is not None):
-            print(f'{self.tag:<19s} items {cur_items:<7d} time {dnnlib.util.format_time(total_time):<12s} ms/item {time_per_item*1e3:.2f}')
+            print(f'{self.tag:<19s} items {cur_items:<7d} time {dnnlib.format_time(total_time):<12s} ms/item {time_per_item*1e3:.2f}')
         self.batch_time = cur_time
         self.batch_items = cur_items
 
@@ -193,7 +193,7 @@ def compute_feature_stats_for_dataset(
     feature_stats_cls=FeatureStats, **stats_kwargs):
 
     dataset_kwargs = video_to_image_dataset_kwargs(opts.dataset_kwargs) if use_image_dataset else opts.dataset_kwargs
-    dataset = dnnlib.util.construct_class_by_name(**dataset_kwargs)
+    dataset = dnnlib.construct_class_by_name(**dataset_kwargs)
 
     if data_loader_kwargs is None:
         data_loader_kwargs = dict(pin_memory=True, num_workers=3, prefetch_factor=2)
@@ -269,7 +269,7 @@ def compute_feature_stats_for_generator(
 
     # Setup generator and load labels.
     G = copy.deepcopy(opts.G).eval().requires_grad_(False).to(opts.device)
-    dataset = dnnlib.util.construct_class_by_name(**opts.dataset_kwargs)
+    dataset = dnnlib.construct_class_by_name(**opts.dataset_kwargs)
 
     # Image generation func.
     def run_generator(z, c, t):
